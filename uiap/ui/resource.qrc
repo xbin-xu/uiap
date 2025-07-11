@@ -1,0 +1,5 @@
+<RCC>
+  <qresource prefix="icon">
+    <file>imgs/firmware_update.png</file>
+  </qresource>
+</RCC>

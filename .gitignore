@@ -1,0 +1,10 @@
+# uiap config
+**/.uiap/*
+
+# pyinstaller
+*.spec
+build/*
+dist/*
+
+# nuitka
+nuitka**
