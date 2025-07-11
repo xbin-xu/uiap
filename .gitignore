@@ -8,3 +8,6 @@ dist/*
 
 # nuitka
 nuitka**
+
+# other
+*.bin

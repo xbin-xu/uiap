@@ -1,3 +1,4 @@
+import os
 import re
 import logging
 import serial
@@ -542,6 +543,67 @@ class UiapWindow(QtWidgets.QWidget, Ui_Form):
                 return False
         return True
 
+    def merge_binary_files(self, file_list, output_path, fill_byte=0xFF):
+        """
+        合并二进制文件到一个输出文件中，并检查重叠与填充空缺。
+
+        :param file_list: 列表，元素为 (file_path, offset)
+        :param output_path: 输出文件路径
+        """
+        # 1. 按照偏移地址排序
+        file_list.sort(key=lambda x: x[1])
+
+        # 2. 读取所有文件内容并记录它们的区间范围
+        segments = []
+        total_size = 0
+
+        for file_path, offset in file_list:
+            with open(file_path, "rb") as f:
+                content = f.read()
+            size = len(content)
+            segment = {
+                "path": file_path,
+                "offset": offset,
+                "size": size,
+                "data": content,
+                "end": offset + size,
+            }
+            segments.append(segment)
+
+            total_size = max(total_size, segment["end"])
+
+        # 3. 检查重叠区域
+        for i in range(1, len(segments)):
+            prev = segments[i - 1]
+            curr = segments[i]
+            if curr["offset"] < prev["end"]:
+                msg = str(
+                    f"merge overlap\n"
+                    f"  {prev['path']} @ {prev['offset']}~{prev['end']}\n"
+                    f"  {curr['path']} @ {curr['offset']}~{curr['end']}"
+                )
+                logger.warning(msg)
+                self.show_dialog(QMessageBox.Icon.Critical, msg)
+                return
+
+        # 4. 创建一个初始填充为 fill_byte 的缓冲区
+        buffer = bytearray([fill_byte] * total_size)
+
+        # 5. 写入数据到缓冲区
+        for seg in segments:
+            start = seg["offset"]
+            end = seg["end"]
+            data = seg["data"]
+            buffer[start:end] = data
+
+        # 6. 写出最终文件
+        with open(output_path, "wb") as f:
+            f.write(buffer)
+
+        msg = f"merge success: {output_path}"
+        logger.info(msg)
+        self.show_dialog(QMessageBox.Icon.Information, msg)
+
     def on_firmware_combine_btn_clicked(self):
         info = self.get_firmware_select_info(
             lambda select, path, address, crypto: select.isChecked()
@@ -549,7 +611,21 @@ class UiapWindow(QtWidgets.QWidget, Ui_Form):
 
         if self.check_firmware_select_info(info) is False:
             return
-        # TODO: 合并固件
+
+        fill_byte = self.firmware_fill_byte_le.text()
+        try:
+            fill_byte_hex = int(fill_byte, 16)
+            assert 0 <= fill_byte_hex <= 255, "fill_byte must in range [0, 0xFF]"
+        except Exception as e:
+            logger.error(f"{e}")
+            self.show_dialog(QMessageBox.Icon.Critical, str(e))
+            return
+
+        bin_list = []
+        for no, select, path, address, crypto in info:
+            assert select == True
+            bin_list.append((path, int(address, 16)))
+        self.merge_binary_files(bin_list, "./merged.bin", fill_byte_hex)
 
     def on_firmware_update_btn_clicked(self):
         info = self.get_firmware_select_info(
