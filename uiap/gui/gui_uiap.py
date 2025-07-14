@@ -334,7 +334,7 @@ class UiapWindow(QtWidgets.QWidget, Ui_Form):
 
         file_path = self.open_file_dialog()
         logger.info(f"file_path is {file_path}")
-        if file_path is None:
+        if file_path is None or file_path == "":
             return
 
         line_edit_widget = self.firmware_select_widgets[idx][1]
