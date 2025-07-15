@@ -60,6 +60,15 @@ wheels = [
 ]
 
 [[package]]
+name = "ordered-set"
+version = "4.1.0"
+source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/4c/ca/bfac8bc689799bcca4157e0e0ced07e70ce125193fc2e166d2e685b7e2fe/ordered-set-4.1.0.tar.gz", hash = "sha256:694a8e44c87657c59292ede72891eb91d34131f6531463aab3009191c77364a8", size = 12826, upload-time = "2022-01-26T14:38:56.6Z" }
+wheels = [
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/33/55/af02708f230eb77084a299d7b08175cff006dea4f2721074b92cdb0296c0/ordered_set-4.1.0-py3-none-any.whl", hash = "sha256:046e1132c71fcf3330438a539928932caf51ddbc582496833e23de611de14562", size = 7634, upload-time = "2022-01-26T14:38:48.677Z" },
+]
+
+[[package]]
 name = "pycparser"
 version = "2.22"
 source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
@@ -145,6 +154,7 @@ dependencies = [
     { name = "cryptography" },
     { name = "pyserial" },
     { name = "pyside6" },
+    { name = "ymodem" },
 ]
 
 [package.metadata]
@@ -152,4 +162,14 @@ requires-dist = [
     { name = "cryptography", specifier = ">=45.0.5" },
     { name = "pyserial", specifier = ">=3.5" },
     { name = "pyside6", specifier = ">=6.9.1" },
+    { name = "ymodem", git = "https://github.com/alexwoo1900/ymodem.git" },
+]
+
+[[package]]
+name = "ymodem"
+version = "1.5"
+source = { git = "https://github.com/alexwoo1900/ymodem.git#1d9611bb5d1b4c01149b228aeee9893588d424ef" }
+dependencies = [
+    { name = "ordered-set" },
+    { name = "pyserial" },
 ]

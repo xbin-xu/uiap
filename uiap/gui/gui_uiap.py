@@ -1,6 +1,7 @@
 import os
 import re
 import logging
+from time import sleep
 import serial
 from pathlib import Path
 from PySide6 import QtWidgets, QtCore
@@ -96,6 +97,7 @@ class UiapWindow(QtWidgets.QWidget, Ui_Form):
         self.serial_thread.connect_slots(
             recv_slot=self.on_serial_recv,
             error_slot=self.on_serial_error,
+            ftp_done_slot=self.on_serial_ftp_done,
         )
         self.serial_thread.start()
 
@@ -470,6 +472,10 @@ class UiapWindow(QtWidgets.QWidget, Ui_Form):
         self.serial_cmb_set_enabled(not self.serial_open_status)
         self.show_dialog(QMessageBox.Icon.Critical, str)
 
+    def on_serial_ftp_done(self, success):
+        logger.info(f"serial ftp ret: {success}")
+        self.serial_thread.mode_change.emit("IO")
+
     def on_serial_rx_tx_hex_chk_state_changed(self, hex_mode: bool = False):
         target_widget = self.serial_rx_tx_pte
         logger.debug(f"{target_widget.objectName()}, {hex_mode}")
@@ -627,6 +633,12 @@ class UiapWindow(QtWidgets.QWidget, Ui_Form):
             bin_list.append((path, int(address, 16)))
         self.merge_binary_files(bin_list, "./merged.bin", fill_byte_hex)
 
+    def on_prev_ftp_send(self):
+        pass
+
+    def on_prev_ftp_send(self):
+        pass
+
     def on_firmware_update_btn_clicked(self):
         info = self.get_firmware_select_info(
             lambda select, path, address, crypto: select.isChecked()
@@ -635,29 +647,67 @@ class UiapWindow(QtWidgets.QWidget, Ui_Form):
         if self.check_firmware_select_info(info) is False:
             return
 
+        protocol = self.firmware_transfer_protocol_cmb.currentText()
+        if not self.serial_thread.serial_mode_change(protocol):
+            msg = "please open serial first"
+            logger.error(msg)
+            self.show_dialog(QMessageBox.Icon.Critical, msg)
+            return
+
         for no, select, path, address, crypto in info:
             assert select == True
 
             file_path = Path(path)
             filename = file_path.stem
             ext = file_path.suffix
-            logger.debug(f"{filename}{ext} -> {filename}_{crypto}{ext}")
 
             address_int = int(address, 16)
 
             crypto_handler = CRYPTO_DICT.get(crypto, None)
+            output_path = path
             if crypto_handler is not None:
+                output_path = f"{filename}_{crypto}{ext}"
                 file_crypto(
                     input_path=path,
-                    output_path=f"{filename}_{crypto}{ext}",
+                    output_path=output_path,
                     crypto_handler=crypto_handler,
                 )
+                logger.info(f"{path} -> {output_path}")
 
             # TODO: 传输固件
+            protocol = self.firmware_transfer_protocol_cmb.currentText()
+            self.serial_thread.mode_change.emit(protocol)
+            sleep(0.5)
+
+            self.serial_thread.ftp_send_file.emit(output_path)
+            logger.info(f"send file emit: {output_path}")
 
     def on_firmware_read_btn_clicked(self):
+        start_address = self.firmware_read_start_address_le.text()
+        size = self.firmware_read_size_le.text()
+
+        start_address_int = 0
+        size_int = 0
+        try:
+            start_address_int = int(start_address, 16)
+            size_int = int(size, 16)
+        except ValueError as e:
+            logger.error(f"{e}")
+            self.show_dialog(QMessageBox.Icon.Critical, str(e))
+            return
+
+        protocol = self.firmware_transfer_protocol_cmb.currentText()
+        if not self.serial_thread.serial_mode_change(protocol):
+            msg = "please open serial first"
+            logger.error(msg)
+            self.show_dialog(QMessageBox.Icon.Critical, msg)
+            return
+
         # TODO: 读取固件
-        pass
+        # ret = self.serial_thread.serial_ftp_recv_file(".")
+        # logger.info(f"firmware read result: {ret}")
+        # self.serial_thread.serial_mode_change("IO")
+        self.serial_thread.ftp_recv_file.emit(".")
 
     def show_dialog(self, level, msg: str):
         msg_box = QMessageBox()

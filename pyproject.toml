@@ -8,8 +8,12 @@ dependencies = [
     "cryptography>=45.0.5",
     "pyserial>=3.5",
     "pyside6>=6.9.1",
+    "ymodem",
 ]
 
 [[tool.uv.index]]
 url = "https://pypi.tuna.tsinghua.edu.cn/simple"
 default = true
+
+[tool.uv.sources]
+ymodem = { git = "https://github.com/alexwoo1900/ymodem.git" }
