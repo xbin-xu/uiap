@@ -3,7 +3,7 @@ import json
 from dataclasses import asdict, dataclass
 import logging
 import serial.tools.list_ports
-from core.crypto.crypto import CRYPTO_KEYS
+from core.crypto import CRYPTO_KEYS
 
 logger = logging.getLogger()
 
@@ -15,7 +15,7 @@ SERIAL_STOP_BITS_ITEMS = ("1", "1.5", "2")
 SERIAL_PARITY_ITEMS = ("None", "Even", "Odd", "Mark", "Space")
 SERIAL_FLOW_CTRL_ITEMS = ("None", "Hardware", "Software")
 FIRMWARE_CRYPTO_ITEMS = CRYPTO_KEYS
-FIRMWARE_TRANSFER_PROTOCOL_ITEMS = ("Raw", "Ymodem")
+FIRMWARE_TRANSFER_PROTOCOL_ITEMS = ("Ymodem",)
 
 COMBO_BOX_ITEMS = {
     "serial_port_cmb": SERIAL_PORT_ITEMS,

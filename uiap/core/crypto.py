@@ -17,7 +17,7 @@ def file_crypto(
         with open(output_path, "wb") as f:
             f.write(processed)
     except Exception as e:
-        logger.error(f"crypto error: {e}")
+        logger.error(f"{e}")
 
 
 def byte_transform(fn):

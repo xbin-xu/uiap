@@ -5,7 +5,7 @@ import logging
 from typing import Callable, Optional
 from typing import *
 from abc import ABC, abstractmethod
-from ymodem.Socket import ModemSocket
+from ymodem.Socket import ModemSocket, YMODEM
 
 logger = logging.getLogger()
 
@@ -15,6 +15,8 @@ class SerialFtp:
         self.ser = ser
 
     def transfer(self, file_path: str, is_send: bool = True) -> bool:
+        if not is_send:
+            return
         try:
             with open(file_path, "rb") as f:
                 content = f.read()
@@ -22,7 +24,7 @@ class SerialFtp:
             self.ser.write(content)
             return True
         except Exception as e:
-            logger.error(f"error: {e}")
+            logger.error(f"{e}")
             return False
 
     def read(self, size, timeout):
@@ -42,7 +44,9 @@ class SerialFtpYmodem(SerialFtp):
     def __init__(self, ser: serial.Serial):
         super().__init__(ser)
         self.ftp = ModemSocket(super().read, self.write)
-        # self.ftp._protocol_features = 0
+        self.ftp._protocol_features = self.ftp._protocol_features & (
+            ~YMODEM.USE_DATE_FIELD
+        )
 
     def transfer(self, file_path: str | List[str], is_send: bool = True) -> bool:
         assert self.ser and self.ftp

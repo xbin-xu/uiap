@@ -1,19 +1,23 @@
 import logging
 from time import sleep
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QObject, Signal, Slot, QTimer
 import serial
-from core.protocol.serial_file_transfer import *
+from core.serial_file_transfer import *
+from .serial_handlers.serial_handler import SerialHandler
+from .serial_handlers.serial_handler_io import SerialHandlerIO
+from .serial_handlers.serial_handler_ymodem import SerialHandlerYmodem
 
 logger = logging.getLogger()
 
 
-class SerialThread(QThread):
+class SerialWorker(QObject):
     """
-    gui_thread          serial_thead
+    ui_thread          serial_thead
     start ------------->
 
     open -------------->
     send -------------->
+    recv_request ------>
          <-------------- recv
     close ------------->
 
@@ -21,40 +25,43 @@ class SerialThread(QThread):
          <-------------- error
     """
 
+    # signals
     open = Signal(str, int, int, int, str, bool, bool, bool)
     close = Signal()
-    recv = Signal(bytes)
     send = Signal(bytes)
+    recv_request = Signal()
+    recv = Signal(bytes)
     error = Signal(str)
     mode_change = Signal(str)
-    ftp_recv_file = Signal(str)
     ftp_send_file = Signal(str)
+    ftp_recv_file = Signal(str)
     ftp_done = Signal(int)
 
-    THREAD_STOP, THREAD_START = (0, 1)
-
-    SERIAL_MODE_IO, SERIAL_MODE_RAW, SERIAL_MODE_YMODEM = ("IO", "Raw", "Ymodem")
-    SERIAL_MODE = (SERIAL_MODE_IO, SERIAL_MODE_RAW, SERIAL_MODE_YMODEM)
-    SERIAL_MODE_DICT = {
-        "IO": SERIAL_MODE_IO,
-        "Raw": SERIAL_MODE_RAW,
-        "Ymodem": SERIAL_MODE_YMODEM,
+    SERIAL_MODE_IO, SERIAL_MODE_YMODEM = ("IO", "Ymodem")
+    SERIAL_MODE = (SERIAL_MODE_IO, SERIAL_MODE_YMODEM)
+    SERIAL_HANDLERS = {
+        SERIAL_MODE_IO: SerialHandlerIO,
+        SERIAL_MODE_YMODEM: SerialHandlerYmodem,
     }
 
-    def __init__(self, parent=None):
-        super().__init__(parent)
+    def __init__(self):
+        super().__init__()
 
         self.ser = None
-        self.thread_running = self.THREAD_STOP
         self.serial_mode = self.SERIAL_MODE_IO
-        self.serial_file_transfer: SerialFileTransfer = None
+        self.serial_handler: SerialHandler = self.SERIAL_HANDLERS[self.serial_mode](
+            self
+        )
+        if self.serial_handler:
+            self.serial_handler.on_enter()
+
         self.open.connect(self.serial_open)
         self.close.connect(self.serial_close)
         self.send.connect(self.serial_send)
+        self.recv_request.connect(self.serial_recv_request)
         self.mode_change.connect(self.serial_mode_change)
-        self.ftp_recv_file.connect(self.serial_ftp_recv_file)
         self.ftp_send_file.connect(self.serial_ftp_send_file)
-        logger.debug(f"serial thread init")
+        self.ftp_recv_file.connect(self.serial_ftp_recv_file)
 
     def connect_slots(self, recv_slot, error_slot=None, ftp_done_slot=None):
         if recv_slot:
@@ -67,6 +74,7 @@ class SerialThread(QThread):
     def serial_is_open(self):
         return self.ser and self.ser.is_open
 
+    @Slot(str, int, int, int, str, bool, bool, bool)
     def serial_open(
         self,
         port=None,
@@ -77,6 +85,8 @@ class SerialThread(QThread):
         xonxoff=False,
         rtscts=False,
         dsrdtr=False,
+        timeout=1,
+        write_timeout=1,
     ):
         try:
             self.ser = serial.Serial(
@@ -88,93 +98,57 @@ class SerialThread(QThread):
                 rtscts=rtscts,
                 stopbits=stopbits,
                 dsrdtr=dsrdtr,
-                timeout=1,  # 防止文件传输时，程序阻塞
-                write_timeout=1,  # 防止使用虚拟串口时，由于对端没有打开导致程序阻塞
+                timeout=timeout,
+                write_timeout=write_timeout,
             )
             logger.info(f"serial open success")
         except Exception as e:
-            logger.error(f"error: {e}")
+            logger.error(f"{e}")
             self.error.emit(str(e))
 
+    @Slot()
     def serial_close(self):
         if self.serial_is_open():
             self.ser.close()
             self.ser = None
             logger.info(f"serial close success")
 
+    @Slot(bytes)
     def serial_send(self, data: bytes):
-        if not self.serial_is_open():
-            logger.error(f"serial is not open")
+        if not self.serial_handler:
+            logger.warning(f"serial handler not ready")
+            return
 
-        try:
-            self.ser.write(data)
-        except serial.SerialTimeoutException as e:
-            logger.warning(f"error: {e}")
-            self.error.emit(str(e))
-        except Exception as e:
-            logger.error(f"error: {e}")
-            self.error.emit(str(e))
+        self.serial_handler.send_data(data)
 
+    @Slot()
+    def serial_recv_request(self):
+        if not self.serial_handler:
+            logger.warning(f"serial handler not ready")
+            return
+
+        self.serial_handler.recv_data()
+
+    @Slot(str)
     def serial_mode_change(self, mode: str):
         assert mode in self.SERIAL_MODE
 
-        if self.ser is None:
-            return False
-
         if mode == self.serial_mode:
-            return True
+            return
+
+        if self.serial_handler:
+            self.serial_handler.on_exit()
 
         self.serial_mode = mode
-        # self.ser.flush()
-        self.ser.reset_input_buffer()
-        self.ser.reset_output_buffer()
-        if not self.ser.is_open:
-            self.ser.open()
+        serial_handler_class: SerialHandler = self.SERIAL_HANDLERS.get(self.serial_mode)
+        if serial_handler_class:
+            self.serial_handler = serial_handler_class(self)
+            self.serial_handler.on_enter()
 
-        if self.serial_mode == self.SERIAL_MODE_IO:
-            pass
-        elif self.serial_mode == self.SERIAL_MODE_RAW:
-            self.serial_file_transfer = SerialFileTransferCustom(
-                self.ser, SerialFtp(self.ser)
-            )
-            pass
-        elif self.serial_mode == self.SERIAL_MODE_YMODEM:
-            self.serial_file_transfer = SerialFileTransferCustom(
-                self.ser, SerialFtpYmodem(self.ser)
-            )
-        return True
+    @Slot(str)
+    def serial_ftp_send_file(self, file_path: str):
+        self.serial_handler.send_file(file_path)
 
-    def serial_ftp_recv_file(self, file_path: str) -> bool:
-        ret = self.serial_file_transfer.transfer(
-            file_path, self.serial_file_transfer.RECV
-        )
-        self.ftp_done.emit(ret)
-
-    def serial_ftp_send_file(self, file_path: str | list[str]) -> bool:
-        ret = self.serial_file_transfer.transfer(
-            file_path, self.serial_file_transfer.SEND
-        )
-        self.ftp_done.emit(ret)
-
-    def thread_quit(self):
-        self.thread_running = self.THREAD_STOP
-
-    def run(self):
-        self.thread_running = self.THREAD_START
-        logger.info(f"serial thread running...")
-
-        try:
-            while self.thread_running:
-                if self.serial_mode == self.SERIAL_MODE_IO and self.serial_is_open():
-                    if self.ser.in_waiting > 0:
-                        data = self.ser.read_all()
-                        self.recv.emit(data)
-                    self.msleep(100)
-                else:
-                    self.msleep(1000)
-        except Exception as e:
-            logger.error(f"error: {e}")
-            self.error.emit(str(e))
-        finally:
-            self.serial_close()
-            logger.info(f"serial thread exited")
+    @Slot(str)
+    def serial_ftp_recv_file(self, file_path: str):
+        self.serial_handler.recv_file(file_path)

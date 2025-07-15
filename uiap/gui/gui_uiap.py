@@ -5,7 +5,7 @@ from time import sleep
 import serial
 from pathlib import Path
 from PySide6 import QtWidgets, QtCore
-from PySide6.QtCore import QTimer, QMetaObject
+from PySide6.QtCore import QTimer, QMetaObject, QThread
 from PySide6.QtWidgets import (
     QComboBox,
     QCheckBox,
@@ -18,10 +18,10 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QFont, QIcon
 from config.config import UiapConfig, CONFIG_FILE, COMBO_BOX_ITEMS
-from core.crypto.crypto import *
+from core.crypto import *
 from utils.log import setup_logging
 from gui.Ui_uiap import Ui_Form  # for IntelliSense
-from gui.serial_thread import SerialThread
+from gui.serial_thread import SerialWorker
 from gui.serial_rx_tx_item import SerialRxTxItem
 from gui.resource_rc import *
 
@@ -93,8 +93,18 @@ class UiapWindow(QtWidgets.QWidget, Ui_Form):
         # 变量初始化
         self.serial_open_status = False
         self.serial_rx_tx_items: list[SerialRxTxItem] = []
-        self.serial_thread = SerialThread()
-        self.serial_thread.connect_slots(
+
+        self.serial_thread = QThread()
+        self.serial_worker = SerialWorker()
+        self.serial_worker.moveToThread(self.serial_thread)
+        self.serial_thread.started.connect(
+            lambda: logger.info("serial worker thread started")
+        )
+        self.serial_thread.finished.connect(
+            lambda: logger.info("serial worker thread finished")
+        )
+        self.serial_thread.finished.connect(self.serial_thread.deleteLater)
+        self.serial_worker.connect_slots(
             recv_slot=self.on_serial_recv,
             error_slot=self.on_serial_error,
             ftp_done_slot=self.on_serial_ftp_done,
@@ -102,6 +112,24 @@ class UiapWindow(QtWidgets.QWidget, Ui_Form):
         self.serial_thread.start()
 
         logger.info("setup uiap window finish")
+
+    def setup_default_value(self):
+        for name, items in COMBO_BOX_ITEMS.items():
+            if name == "firmware_crypto_cmb":
+                for i in range(8):
+                    widget = getattr(self, f"{name}_{i}")
+                    widget.addItems(items)
+            else:
+                widget = getattr(self, name)
+                widget.addItems(items)
+        self.serial_cmb_set_enabled(True)
+        self.serial_rts_dtr_chk_set_enabled()
+
+        # 设置等宽字体
+        font = QFont("Consolas")
+        self.serial_rx_tx_pte.setFont(font)
+        self.serial_tx_pte.setFont(font)
+        self.log_pte.setFont(font)
 
     def get_firmware_select_widgets(self):
         self.firmware_select_widgets = []
@@ -121,24 +149,6 @@ class UiapWindow(QtWidgets.QWidget, Ui_Form):
                     logger.warning(f"{widget_name}_{idx} not found")
                 firmware_select_widget.append(widget)
             self.firmware_select_widgets.append(firmware_select_widget)
-
-    def setup_default_value(self):
-        for name, items in COMBO_BOX_ITEMS.items():
-            if name == "firmware_crypto_cmb":
-                for i in range(8):
-                    widget = getattr(self, f"{name}_{i}")
-                    widget.addItems(items)
-            else:
-                widget = getattr(self, name)
-                widget.addItems(items)
-        self.serial_cmb_set_enabled(True)
-        self.serial_rts_dtr_chk_set_enabled()
-
-        # 设置等宽字体
-        font = QFont("Consolas")
-        self.serial_rx_tx_pte.setFont(font)
-        self.serial_tx_pte.setFont(font)
-        self.log_pte.setFont(font)
 
     def setup_config_value(self):
         # load config
@@ -377,6 +387,17 @@ class UiapWindow(QtWidgets.QWidget, Ui_Form):
             if self.serial_open_status:
                 self.serial_open_btn.clicked.emit()
 
+    def serial_rts_dtr_chk_set_enabled(self):
+        self.serial_rts_chk.setEnabled(
+            self.serial_flow_ctrl_cmb.currentText() == "Hardware"
+        )
+        self.serial_dtr_chk.setEnabled(
+            self.serial_flow_ctrl_cmb.currentText() == "Hardware"
+        )
+
+    def on_serial_flow_ctrl_cmb_currentTextChanged(self, text):
+        self.serial_rts_dtr_chk_set_enabled()
+
     def serial_cmb_set_enabled(self, enable):
         self.serial_port_cmb.setEnabled(enable)
         self.serial_baud_rate_cmb.setEnabled(enable)
@@ -389,17 +410,6 @@ class UiapWindow(QtWidgets.QWidget, Ui_Form):
         self.serial_rts_dtr_chk_set_enabled()
         self.serial_send_btn.setEnabled(not enable)
 
-    def serial_rts_dtr_chk_set_enabled(self):
-        self.serial_rts_chk.setEnabled(
-            self.serial_flow_ctrl_cmb.currentText() == "Hardware"
-        )
-        self.serial_dtr_chk.setEnabled(
-            self.serial_flow_ctrl_cmb.currentText() == "Hardware"
-        )
-
-    def on_serial_flow_ctrl_cmb_currentTextChanged(self, text):
-        self.serial_rts_dtr_chk_set_enabled()
-
     def on_serial_open_btn_clicked(self):
         self.serial_open_status = not self.serial_open_status
         logger.debug(f"serial_open_status is {self.serial_open_status}")
@@ -407,7 +417,7 @@ class UiapWindow(QtWidgets.QWidget, Ui_Form):
         if self.serial_open_status is True:
             self.serial_open_btn.setText("关闭串口")
 
-            self.serial_thread.open.emit(
+            self.serial_worker.open.emit(
                 self.uiap_config.port,
                 int(self.uiap_config.baud_rate),
                 int(self.uiap_config.data_bits),
@@ -419,7 +429,7 @@ class UiapWindow(QtWidgets.QWidget, Ui_Form):
             )
         else:
             self.serial_open_btn.setText("打开串口")
-            self.serial_thread.close.emit()
+            self.serial_worker.close.emit()
 
         self.serial_cmb_set_enabled(not self.serial_open_status)
 
@@ -442,7 +452,7 @@ class UiapWindow(QtWidgets.QWidget, Ui_Form):
         send_text = self.serial_tx_pte.toPlainText()
         try:
             bytes = self.to_bytes(send_text, self.uiap_config.tx_hex)
-            self.serial_thread.send.emit(bytes)
+            self.serial_worker.send.emit(bytes)
             serial_rx_tx_item = SerialRxTxItem.tx(bytes)
             logger.info(serial_rx_tx_item)
             self.serial_rx_tx_items.append(serial_rx_tx_item)
@@ -452,7 +462,7 @@ class UiapWindow(QtWidgets.QWidget, Ui_Form):
                 else serial_rx_tx_item.decode()
             )
         except Exception as e:
-            logger.error(f"error: {e}")
+            logger.error(f"{e}")
 
     def on_serial_recv(self, bytes):
         logger.debug(f"{bytes}")
@@ -466,15 +476,16 @@ class UiapWindow(QtWidgets.QWidget, Ui_Form):
         )
 
     def on_serial_error(self, str):
-        logger.error(f"{str}")
+        # logger.error(f"{str}")
         self.serial_open_status = False
-        self.serial_thread.close.emit()
+        self.serial_worker.close.emit()
         self.serial_cmb_set_enabled(not self.serial_open_status)
-        self.show_dialog(QMessageBox.Icon.Critical, str)
+        self.show_msg_box(QMessageBox.Icon.Critical, str)
 
     def on_serial_ftp_done(self, success):
-        logger.info(f"serial ftp ret: {success}")
-        self.serial_thread.mode_change.emit("IO")
+        logger.info(f"on_serial_ftp_done: {success}")
+        # self.serial_worker.mode_change.emit("IO")
+        self.serial_worker.serial_mode_change("IO")
 
     def on_serial_rx_tx_hex_chk_state_changed(self, hex_mode: bool = False):
         target_widget = self.serial_rx_tx_pte
@@ -489,7 +500,7 @@ class UiapWindow(QtWidgets.QWidget, Ui_Form):
                     else serial_rx_tx_item.decode()
                 )
         except Exception as e:
-            logger.error(f"error: {e}")
+            logger.error(f"{e}")
 
     def on_serial_tx_hex_chk_state_changed(self, hex_mode: bool = False):
         target_widget = self.serial_tx_pte
@@ -501,7 +512,7 @@ class UiapWindow(QtWidgets.QWidget, Ui_Form):
             text_str = self.to_str(text_bytes, hex_mode)
             target_widget.setPlainText(text_str)
         except Exception as e:
-            logger.error(f"error: {e}")
+            logger.error(f"{e}")
 
     def on_serial_clear_btn_clicked(self):
         self.serial_rx_tx_items = []
@@ -537,7 +548,7 @@ class UiapWindow(QtWidgets.QWidget, Ui_Form):
                     pass  # 只需尝试打开，不需要读内容
             except IOError as e:
                 logger.error(f"{e}")
-                self.show_dialog(QMessageBox.Icon.Critical, str(e))
+                self.show_msg_box(QMessageBox.Icon.Critical, str(e))
                 return False
 
             # address 是否为合法的十六进制字符串
@@ -545,7 +556,7 @@ class UiapWindow(QtWidgets.QWidget, Ui_Form):
                 int(address, 16)
             except ValueError as e:
                 logger.error(f"{e}")
-                self.show_dialog(QMessageBox.Icon.Critical, str(e))
+                self.show_msg_box(QMessageBox.Icon.Critical, str(e))
                 return False
         return True
 
@@ -589,7 +600,7 @@ class UiapWindow(QtWidgets.QWidget, Ui_Form):
                     f"  {curr['path']} @ {curr['offset']}~{curr['end']}"
                 )
                 logger.warning(msg)
-                self.show_dialog(QMessageBox.Icon.Critical, msg)
+                self.show_msg_box(QMessageBox.Icon.Critical, msg)
                 return
 
         # 4. 创建一个初始填充为 fill_byte 的缓冲区
@@ -608,7 +619,7 @@ class UiapWindow(QtWidgets.QWidget, Ui_Form):
 
         msg = f"merge success: {output_path}"
         logger.info(msg)
-        self.show_dialog(QMessageBox.Icon.Information, msg)
+        self.show_msg_box(QMessageBox.Icon.Information, msg)
 
     def on_firmware_combine_btn_clicked(self):
         info = self.get_firmware_select_info(
@@ -624,7 +635,7 @@ class UiapWindow(QtWidgets.QWidget, Ui_Form):
             assert 0 <= fill_byte_hex <= 255, "fill_byte must in range [0, 0xFF]"
         except Exception as e:
             logger.error(f"{e}")
-            self.show_dialog(QMessageBox.Icon.Critical, str(e))
+            self.show_msg_box(QMessageBox.Icon.Critical, str(e))
             return
 
         bin_list = []
@@ -647,12 +658,14 @@ class UiapWindow(QtWidgets.QWidget, Ui_Form):
         if self.check_firmware_select_info(info) is False:
             return
 
-        protocol = self.firmware_transfer_protocol_cmb.currentText()
-        if not self.serial_thread.serial_mode_change(protocol):
+        if self.serial_open_status == False:
             msg = "please open serial first"
             logger.error(msg)
-            self.show_dialog(QMessageBox.Icon.Critical, msg)
+            self.show_msg_box(QMessageBox.Icon.Critical, msg)
             return
+
+        protocol = self.firmware_transfer_protocol_cmb.currentText()
+        self.serial_worker.serial_mode_change(protocol)
 
         for no, select, path, address, crypto in info:
             assert select == True
@@ -674,12 +687,7 @@ class UiapWindow(QtWidgets.QWidget, Ui_Form):
                 )
                 logger.info(f"{path} -> {output_path}")
 
-            # TODO: 传输固件
-            protocol = self.firmware_transfer_protocol_cmb.currentText()
-            self.serial_thread.mode_change.emit(protocol)
-            sleep(0.5)
-
-            self.serial_thread.ftp_send_file.emit(output_path)
+            self.serial_worker.ftp_send_file.emit(output_path)
             logger.info(f"send file emit: {output_path}")
 
     def on_firmware_read_btn_clicked(self):
@@ -693,23 +701,25 @@ class UiapWindow(QtWidgets.QWidget, Ui_Form):
             size_int = int(size, 16)
         except ValueError as e:
             logger.error(f"{e}")
-            self.show_dialog(QMessageBox.Icon.Critical, str(e))
+            self.show_msg_box(QMessageBox.Icon.Critical, str(e))
             return
 
-        protocol = self.firmware_transfer_protocol_cmb.currentText()
-        if not self.serial_thread.serial_mode_change(protocol):
+        if self.serial_open_status == False:
             msg = "please open serial first"
             logger.error(msg)
             self.show_dialog(QMessageBox.Icon.Critical, msg)
             return
 
+        protocol = self.firmware_transfer_protocol_cmb.currentText()
+        self.serial_worker.serial_mode_change(protocol)
+
         # TODO: 读取固件
         # ret = self.serial_thread.serial_ftp_recv_file(".")
         # logger.info(f"firmware read result: {ret}")
         # self.serial_thread.serial_mode_change("IO")
-        self.serial_thread.ftp_recv_file.emit(".")
+        self.serial_worker.ftp_recv_file.emit(".")
 
-    def show_dialog(self, level, msg: str):
+    def show_msg_box(self, level, msg: str):
         msg_box = QMessageBox()
 
         msg_box.setWindowTitle("dialog")
@@ -721,7 +731,6 @@ class UiapWindow(QtWidgets.QWidget, Ui_Form):
         msg_box.exec()
 
     def closeEvent(self, event):
-        self.serial_thread.thread_quit()
         self.serial_thread.quit()
         self.serial_thread.wait()
         super().closeEvent(event)

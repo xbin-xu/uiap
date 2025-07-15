@@ -17,3 +17,8 @@ default = true
 
 [tool.uv.sources]
 ymodem = { git = "https://github.com/alexwoo1900/ymodem.git" }
+
+[dependency-groups]
+build = [
+    "pyinstaller>=6.14.2",
+]
