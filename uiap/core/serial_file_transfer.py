@@ -124,7 +124,7 @@ class SerialFileTransferCustom(SerialFileTransfer):
         if is_send:
             self.ser.write(b"u")
         else:
-            self.ser.write(b"r")
+            self.ser.write(b"d")
         sleep(0.2)
         return True
 
