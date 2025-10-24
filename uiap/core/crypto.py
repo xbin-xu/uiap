@@ -1,6 +1,9 @@
 from typing import Callable
 import logging
 
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.padding import PKCS7
+from cryptography.hazmat.backends import default_backend
 
 logger = logging.getLogger(__name__)
 
@@ -61,11 +64,6 @@ def add_n_encrypt(n: int):
 def add_n_decrypt(n: int):
     assert 0 < n and n < 256
     return byte_transform(lambda b: (b - n) % 256)
-
-
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives.padding import PKCS7
-from cryptography.hazmat.backends import default_backend
 
 
 def aes_128_ecb_encrypt(key: bytes):

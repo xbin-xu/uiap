@@ -11,7 +11,7 @@ def now_str():
 class SerialRxTxItem:
     timestamp: str = ""
     rx_tx: bool = False
-    data: bytes = ""
+    data: bytes = b""
 
     def __post_init__(self):
         if not self.timestamp:

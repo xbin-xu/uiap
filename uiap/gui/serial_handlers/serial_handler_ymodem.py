@@ -1,14 +1,14 @@
-from PySide6.QtCore import Signal, Slot, QTimer
-import serial
 import logging
-from .serial_handler import SerialHandler
-from core.serial_file_transfer import *
+from gui.serial_handlers.serial_handler import SerialHandler
+from core.serial_file_transfer import SerialFileTransferCustom, SerialFtpYmodem
+
+# from gui.serial_thread import SerialWorker
 
 logger = logging.getLogger(__name__)
 
 
 class SerialHandlerYmodem(SerialHandler):
-    def __init__(self, serial_worker=None):
+    def __init__(self, serial_worker):
         super().__init__(serial_worker)
         self.ftp = SerialFileTransferCustom(
             self.serial_worker.ser, SerialFtpYmodem(self.serial_worker.ser)

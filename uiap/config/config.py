@@ -1,6 +1,6 @@
 import os
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 import logging
 import serial.tools.list_ports
 from core.crypto import CRYPTO_KEYS
@@ -56,10 +56,10 @@ class UiapConfig:
     read_start_address: str = ""
     read_size: str = ""
 
-    select_items: list[FirmwareSelectItem] = None
+    select_items: list[FirmwareSelectItem] = field(default_factory=list)
 
     def __post_init__(self):
-        if self.select_items is None:
+        if not self.select_items:
             self.select_items = [FirmwareSelectItem() for _ in range(8)]
 
     @classmethod

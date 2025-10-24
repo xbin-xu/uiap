@@ -1,9 +1,10 @@
-import os
+# import os
 from time import sleep
 import serial
 import logging
-from typing import Callable, Optional
-from typing import *
+
+# from typing import Callable, Optional
+from typing import List
 from abc import ABC, abstractmethod
 from ymodem.Socket import ModemSocket, YMODEM
 
@@ -14,9 +15,11 @@ class SerialFtp:
     def __init__(self, ser: serial.Serial):
         self.ser = ser
 
-    def transfer(self, file_path: str, is_send: bool = True) -> bool:
+    def transfer(self, file_path: str | List[str], is_send: bool = True) -> bool:
+        if isinstance(file_path, List):
+            return False
         if not is_send:
-            return
+            return False
         try:
             with open(file_path, "rb") as f:
                 content = f.read()
@@ -88,7 +91,7 @@ class SerialFileTransfer(ABC):
             logger.error("serial is None")
             return False
 
-        if self.ser.is_open == False:
+        if not self.ser.is_open:
             try:
                 self.ser.open()
             except Exception as e:
@@ -100,7 +103,7 @@ class SerialFileTransfer(ABC):
             return False
 
         if not self.file_transfer_protocol.transfer(file_path, is_send):
-            logger.info(f"send ret False")
+            logger.info("send ret False")
             return False
 
         if not self.post_transfer(is_send):
@@ -119,9 +122,9 @@ class SerialFileTransfer(ABC):
 class SerialFileTransferCustom(SerialFileTransfer):
     def prev_transfer(self, is_send: bool = True) -> bool:
         if is_send:
-            self.ser.write(b"1")
+            self.ser.write(b"u")
         else:
-            self.ser.write(b"2")
+            self.ser.write(b"r")
         sleep(0.2)
         return True
 

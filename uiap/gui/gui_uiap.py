@@ -1,29 +1,26 @@
-import os
 import re
 import logging
-from time import sleep
-import serial
+from serial.tools import list_ports
 from pathlib import Path
-from PySide6 import QtWidgets, QtCore
-from PySide6.QtCore import QTimer, QMetaObject, QThread
+from PySide6 import QtWidgets
+from PySide6.QtCore import QTimer, QThread
 from PySide6.QtWidgets import (
     QComboBox,
     QCheckBox,
     QLineEdit,
-    QPushButton,
     QToolButton,
-    QPlainTextEdit,
     QFileDialog,
     QMessageBox,
 )
-from PySide6.QtGui import QFont, QIcon
+from PySide6.QtGui import QFont
 from config.config import UiapConfig, CONFIG_FILE, COMBO_BOX_ITEMS
-from core.crypto import *
+from core.crypto import CRYPTO_DICT, file_crypto
 from utils.log import setup_logging
 from gui.Ui_uiap import Ui_Form  # for IntelliSense
 from gui.serial_thread import SerialWorker
 from gui.serial_rx_tx_item import SerialRxTxItem
-from gui.resource_rc import *
+
+# from gui.resource_rc import *
 
 logger = logging.getLogger()
 
@@ -36,12 +33,7 @@ class QtLoggerHandler(logging.Handler):
 
     def emit(self, record):
         msg = self.format(record)
-        QtCore.QMetaObject.invokeMethod(
-            self.text_edit,
-            "appendPlainText",
-            QtCore.Qt.ConnectionType.QueuedConnection,
-            QtCore.Q_ARG(str, msg),
-        )
+        self.text_edit.appendPlainText(msg)
 
 
 class UiapWindow(QtWidgets.QWidget, Ui_Form):
@@ -354,7 +346,7 @@ class UiapWindow(QtWidgets.QWidget, Ui_Form):
         self.uiap_config.to_json_file(CONFIG_FILE)
 
     def scan_serial_port(self):
-        return [port.device for port in serial.tools.list_ports.comports()]
+        return [port.device for port in list_ports.comports()]
 
     def on_serial_scan_port_timer_timeout(self):
 
@@ -544,7 +536,7 @@ class UiapWindow(QtWidgets.QWidget, Ui_Form):
 
             # path 是否为可打开的文件路径
             try:
-                with open(path, "rb") as f:
+                with open(path, "rb") as _f:
                     pass  # 只需尝试打开，不需要读内容
             except IOError as e:
                 logger.error(f"{e}")
@@ -640,12 +632,9 @@ class UiapWindow(QtWidgets.QWidget, Ui_Form):
 
         bin_list = []
         for no, select, path, address, crypto in info:
-            assert select == True
+            assert select is True
             bin_list.append((path, int(address, 16)))
         self.merge_binary_files(bin_list, "./merged.bin", fill_byte_hex)
-
-    def on_prev_ftp_send(self):
-        pass
 
     def on_prev_ftp_send(self):
         pass
@@ -658,7 +647,7 @@ class UiapWindow(QtWidgets.QWidget, Ui_Form):
         if self.check_firmware_select_info(info) is False:
             return
 
-        if self.serial_open_status == False:
+        if not self.serial_open_status:
             msg = "please open serial first"
             logger.error(msg)
             self.show_msg_box(QMessageBox.Icon.Critical, msg)
@@ -668,13 +657,13 @@ class UiapWindow(QtWidgets.QWidget, Ui_Form):
         self.serial_worker.serial_mode_change(protocol)
 
         for no, select, path, address, crypto in info:
-            assert select == True
+            assert select is True
 
             file_path = Path(path)
             filename = file_path.stem
             ext = file_path.suffix
 
-            address_int = int(address, 16)
+            # address_int = int(address, 16)
 
             crypto_handler = CRYPTO_DICT.get(crypto, None)
             output_path = path
@@ -694,20 +683,20 @@ class UiapWindow(QtWidgets.QWidget, Ui_Form):
         start_address = self.firmware_read_start_address_le.text()
         size = self.firmware_read_size_le.text()
 
-        start_address_int = 0
-        size_int = 0
+        _start_address_int = 0
+        _size_int = 0
         try:
-            start_address_int = int(start_address, 16)
-            size_int = int(size, 16)
+            _start_address_int = int(start_address, 16)
+            _size_int = int(size, 16)
         except ValueError as e:
             logger.error(f"{e}")
             self.show_msg_box(QMessageBox.Icon.Critical, str(e))
             return
 
-        if self.serial_open_status == False:
+        if not self.serial_open_status:
             msg = "please open serial first"
             logger.error(msg)
-            self.show_dialog(QMessageBox.Icon.Critical, msg)
+            self.show_msg_box(QMessageBox.Icon.Critical, msg)
             return
 
         protocol = self.firmware_transfer_protocol_cmb.currentText()

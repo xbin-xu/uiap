@@ -1,8 +1,6 @@
 import logging
-from time import sleep
-from PySide6.QtCore import QObject, Signal, Slot, QTimer
+from PySide6.QtCore import QObject, Signal, Slot
 import serial
-from core.serial_file_transfer import *
 from .serial_handlers.serial_handler import SerialHandler
 from .serial_handlers.serial_handler_io import SerialHandlerIO
 from .serial_handlers.serial_handler_ymodem import SerialHandlerYmodem
@@ -47,7 +45,7 @@ class SerialWorker(QObject):
     def __init__(self):
         super().__init__()
 
-        self.ser = None
+        self.ser: serial.Serial | None = serial.Serial()
         self.serial_mode = self.SERIAL_MODE_IO
         self.serial_handler: SerialHandler = self.SERIAL_HANDLERS[self.serial_mode](
             self
@@ -101,7 +99,7 @@ class SerialWorker(QObject):
                 timeout=timeout,
                 write_timeout=write_timeout,
             )
-            logger.info(f"serial open success")
+            logger.info("serial open success")
         except Exception as e:
             logger.error(f"{e}")
             self.error.emit(str(e))
@@ -109,14 +107,15 @@ class SerialWorker(QObject):
     @Slot()
     def serial_close(self):
         if self.serial_is_open():
+            assert self.ser is not None
             self.ser.close()
             self.ser = None
-            logger.info(f"serial close success")
+            logger.info("serial close success")
 
     @Slot(bytes)
     def serial_send(self, data: bytes):
         if not self.serial_handler:
-            logger.warning(f"serial handler not ready")
+            logger.warning("serial handler not ready")
             return
 
         self.serial_handler.send_data(data)
@@ -124,7 +123,7 @@ class SerialWorker(QObject):
     @Slot()
     def serial_recv_request(self):
         if not self.serial_handler:
-            logger.warning(f"serial handler not ready")
+            logger.warning("serial handler not ready")
             return
 
         self.serial_handler.recv_data()
@@ -140,7 +139,9 @@ class SerialWorker(QObject):
             self.serial_handler.on_exit()
 
         self.serial_mode = mode
-        serial_handler_class: SerialHandler = self.SERIAL_HANDLERS.get(self.serial_mode)
+        serial_handler_class: SerialHandler | None = self.SERIAL_HANDLERS.get(
+            self.serial_mode
+        )
         if serial_handler_class:
             self.serial_handler = serial_handler_class(self)
             self.serial_handler.on_enter()
